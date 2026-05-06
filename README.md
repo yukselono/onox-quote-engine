@@ -205,6 +205,6 @@ ONO develops:
 - Smart city technologies
 
 Website:
-https://onox.dev
+https://ono.software
 
 ---
