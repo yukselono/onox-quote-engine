@@ -138,6 +138,119 @@ const buildQuote = ({ form, items, specs }) => {
 
 const safeNumber = (v) => (v === "" ? "" : Number(v) || 0);
 
+// --- BRIEF EXPORT ---
+// Map a generated quote → a SUNX Sense Mission Brief data.json
+// Schema: https://github.com/yukselono/sunx-sense/blob/main/briefs/schema.json
+const SUNX_BRIEF_URL = "https://yukselono.github.io/sunx-sense/briefs/import.html";
+
+const quoteToBriefData = (quote) => {
+  const client = quote.companyName || "Müşteri";
+  const items = quote.items || [];
+  const totalUnits = items.reduce((acc, i) => acc + Number(i.qty || 0), 0);
+  // Pick the most expensive non-custom item as the headline project, else first item
+  const headlineItem = [...items]
+    .filter(i => i.catalogId !== 'custom' && i.name)
+    .sort((a, b) => Number(b.price) - Number(a.price))[0] || items[0];
+  const project = headlineItem ? headlineItem.name.split('—')[0].trim() : "Carbostar PX";
+  const currency = CURRENCIES[quote.currency] || CURRENCIES.USD;
+  const fmt = (n) => currency.symbol + new Intl.NumberFormat(currency.locale, { maximumFractionDigits: 0 }).format(Math.round(n));
+
+  // Default event date = 60 days out (sensible runway for an event-driven deployment)
+  const eventDate = new Date(Date.now() + 60 * 86400000);
+  const eventDateISO = eventDate.toISOString();
+  const eventDateLabel = eventDate.toLocaleDateString('en-GB',
+    { day: 'numeric', month: 'short', year: 'numeric' }).toUpperCase();
+
+  return {
+    meta: {
+      client,
+      project,
+      documentId: quote.id || "ONX-DRAFT",
+      eventDate: eventDateISO,
+      updatedAt: new Date().toLocaleDateString('en-GB',
+        { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase(),
+      audience: "CUSTOMER",
+      accentHue: 230,
+      outputFilename: `${client} Mission Brief.html`,
+    },
+    hero: {
+      eyebrow: `${client.toUpperCase()} · OPERATIONAL BRIEF · CUSTOMER`,
+      headline: {
+        lines: [
+          `For ${client}.`,
+          `${totalUnits || items.length} unit${totalUnits === 1 ? '' : 's'}, one timeline.`,
+        ],
+        accent: project + " ready.",
+      },
+      lede: `ONO Yazılım proposes a structured deployment of ${project} for ${client}. This brief captures the operational plan — venue, fleet, dashboard, roadmap and risks — companion to proposal ${quote.id}.`,
+      stats: [
+        { v: String(totalUnits || items.length), l: project.toUpperCase().slice(0, 18), sub: "primary fleet" },
+        { v: String(items.length), l: "LINE ITEMS", sub: "in proposal" },
+        { v: fmt(quote.subtotal || 0), l: "SUBTOTAL", sub: "+ KDV" },
+        { v: fmt(quote.total || 0), l: "TOTAL", sub: "incl. tax" },
+        { v: quote.id || "DRAFT", l: "PROPOSAL ID", sub: quote.dateStr || "" },
+        { v: quote.warrantyShort || "24 Ay", l: "WARRANTY", sub: quote.deliveryShort || "" },
+      ],
+    },
+    stage: {
+      venue: "TBD · venue to be confirmed with client",
+      dates: eventDateLabel,
+      format: "Operational deployment",
+      scale: `${totalUnits} unit${totalUnits === 1 ? '' : 's'}`,
+      role: "Technology & operations provider. Invisible by design.",
+      frontStage: { who: client, sub: "Brand · narrative · audience" },
+      backStage:  { who: "ONO Yazılım", sub: "Devices · software · ops" },
+    },
+    fleet: {
+      units: totalUnits || items.length,
+      buffer: Math.max(1, Math.round((totalUnits || items.length) * 0.1)),
+      lot: "LOT TBD",
+      idRange: "TBD",
+      calibration: "NIST-traceable · ±30 ppm @ 400 ppm",
+      shipDate: "TBD",
+    },
+    dashboard: {
+      headline: "Live data, projected on a single dashboard.",
+      description: `Streams from the deployed ${project} fleet, accessible via a white-label dashboard. Dual-language, audience-readable, no jargon.`,
+      streamCount: totalUnits || items.length,
+      languages: ["EN", "TR"],
+    },
+    roadmap: {
+      phases: [
+        { id: "T-21", title: "Production lock",     window: "− 3 weeks", deliverable: "BoM frozen", status: "ACTIVE" },
+        { id: "T-14", title: "Calibration & QA",    window: "− 2 weeks", deliverable: "Fleet calibrated", status: "NEXT" },
+        { id: "T-7",  title: "Logistics",            window: "− 1 week",  deliverable: "Units at venue", status: "NEXT" },
+        { id: "T-0",  title: "Go-live",              window: "Event week", deliverable: "Deployment live", status: "NEXT" },
+        { id: "T+14", title: "Case study",           window: "+ 2 weeks", deliverable: "Co-authored writeup", status: "NEXT" },
+      ],
+    },
+    risks: [
+      { title: "Scope creep beyond proposal",      severity: "MED",  owner: "Account",      mitigation: "Change-requests go through written addendum to the original proposal." },
+      { title: "Calibration drift in transit",     severity: "MED",  owner: "Hardware Ops", mitigation: "Buffer units + on-site recalibration kit." },
+      { title: "Network instability at venue",     severity: "MED",  owner: "Site Ops",     mitigation: "Dual SIM + local-cache mode for dashboard." },
+      { title: "Talent unavailability during event", severity: "LOW", owner: "People Ops",  mitigation: "Rotating shift schedule, on-call list." },
+    ],
+    closing: {
+      bridgeNodes: [
+        { when: "PHASE 1",  what: "Deploy",     desc: `Initial ${project} fleet operational at ${client}'s site.` },
+        { when: "PHASE 2",  what: "Optimize",   desc: "Quarterly tuning + dashboard refinements based on real-world data." },
+        { when: "PHASE 3",  what: "Expand",     desc: "Optional fleet expansion, additional sensors, multi-site coverage." },
+      ],
+      manifesto: `This deployment for ${client} is operational, not symbolic. Every device, every dashboard view, every weekly report is a measured contribution to environmental intelligence.`,
+      signoff: "ONO Yazılım · operations spine · invisible by design",
+    },
+  };
+};
+
+const openMissionBrief = (quote) => {
+  const data = quoteToBriefData(quote);
+  // base64 encode (UTF-8 safe)
+  const json = JSON.stringify(data);
+  const b64 = btoa(unescape(encodeURIComponent(json)));
+  const url = `${SUNX_BRIEF_URL}#data=${encodeURIComponent(b64)}`;
+  window.open(url, '_blank', 'noopener');
+};
+
 // --- STATE REDUCER ---
 const initialState = {
   form: { 
@@ -449,6 +562,9 @@ export default function App() {
           <div>
             <div className="max-w-[210mm] mx-auto flex items-center justify-end mb-4 print:hidden gap-2">
               <button onClick={() => dispatch({ type: 'RESET' })} className="px-4 py-1.5 border border-[#D0D8E5] text-[#0A1128] text-[9px] font-bold tracking-widest uppercase hover:bg-white transition-colors">YENİ</button>
+              <button onClick={() => openMissionBrief(result)} className="px-4 py-1.5 border border-[#00B4FF] text-[#00B4FF] text-[9px] font-bold tracking-widest uppercase flex items-center gap-2 hover:bg-[#00B4FF] hover:text-white transition-colors" title="Open SUNX Sense Mission Brief preview in a new tab">
+                <Zap className="h-3 w-3" /> MİSSİON BRIEF
+              </button>
               <button onClick={() => window.print()} className="px-4 py-1.5 bg-[#0A1128] text-white text-[9px] font-bold tracking-widest uppercase flex items-center gap-2 shadow-lg">
                 <Download className="h-3 w-3" /> PDF / YAZDIR
               </button>
